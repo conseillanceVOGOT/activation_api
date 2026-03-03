@@ -1,14 +1,1 @@
-{
-    "FREE-0001": {
-        "type": "FREE",
-        "expires": null
-    },
-    "ANNUAL-0001": {
-        "type": "ANNUAL",
-        "expires": "2026-12-31"
-    },
-    "LIFE-0001": {
-        "type": "LIFETIME",
-        "expires": null
-    }
-}
+
