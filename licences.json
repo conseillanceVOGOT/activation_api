@@ -1,15 +1,3 @@
 {
-    "FREE-0001": {
-        "type": "FREE",
-        "expires": null
-    },
-    "ANNUAL-0001": {
-        "type": "ANNUAL",
-        "expires": "2027-02-24"
-    },
-    "LIFE-0001": {
-        "type": "LIFETIME",
-        "expires": null
-    }
+  "licences": []
 }
-
