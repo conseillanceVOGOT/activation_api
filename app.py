@@ -2,6 +2,9 @@ from flask import Flask, request, jsonify
 import json
 import os
 from datetime import datetime, timedelta
+import stripe
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 app = Flask(__name__)
 
