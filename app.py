@@ -219,6 +219,40 @@ def activate():
     # Type inconnu
     return jsonify({"status": "invalid", "reason": "unknown_type"})
 
+# =====================================================
+# ENDPOINT COMPATIBLE AVEC TON LOGICIEL (SIRET)
+# =====================================================
+
+@app.post("/api/licence/verify")
+def verify_licence():
+    data = request.get_json() or {}
+    siret = data.get("siret")
+    licence_type = data.get("licence_type")
+
+    # Vérification SIRET
+    if not siret or not siret.isdigit() or len(siret) != 14:
+        return jsonify({"status": "INVALID_SIRET"})
+
+    # Génération de la licence
+    licence_key, expires = generate_licence(licence_type, siret)
+    if not licence_key:
+        return jsonify({"status": "INVALID_TYPE"})
+
+    # Enregistrement dans licences.json
+    add_licence_entry(
+        licence_key=licence_key,
+        licence_type=licence_type,
+        siret=siret,
+        expires=expires,
+        provider="manual"
+    )
+
+    return jsonify({
+        "status": "OK",
+        "licence_type": licence_type,
+        "expires_at": expires,
+        "licence_key": licence_key
+    })
 
 # =====================================================
 # LANCEMENT LOCAL (debug)
