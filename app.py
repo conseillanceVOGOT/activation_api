@@ -4,7 +4,12 @@ import os
 from datetime import datetime, timedelta
 import stripe
 
+# =====================================================
+# CONFIGURATION STRIPE
+# =====================================================
+
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")  # IMPORTANT : nouveau secret Stripe
 
 app = Flask(__name__)
 
@@ -36,22 +41,14 @@ def find_licence(licence_key):
 
 
 def generate_licence(licence_type, siret):
-    """
-    Génère une clé de licence et une date d'expiration
-    à partir du type et du SIRET.
-    """
     if not siret or not siret.isdigit() or len(siret) != 14:
         return None, None
 
-    # Clé de licence (même logique que ton ancien serveur)
     licence_key = f"VOGOT-{siret[-4:]}-{licence_type}"
 
-    # Expiration
     if licence_type == "ANNUAL":
         expires = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
-    elif licence_type == "LIFETIME":
-        expires = None
-    elif licence_type == "FREE":
+    elif licence_type in ["LIFETIME", "FREE"]:
         expires = None
     else:
         return None, None
@@ -82,26 +79,28 @@ def add_licence_entry(licence_key, licence_type, siret, expires, provider, email
 
 
 # =====================================================
-# WEBHOOKS STRIPE / PAYPAL
+# WEBHOOK STRIPE (SÉCURISÉ)
 # =====================================================
 
 @app.post("/api/webhook/stripe")
 def webhook_stripe():
-    """
-    Webhook Stripe : on attend au minimum :
-    {
-        "licence_type": "ANNUAL" ou "LIFETIME",
-        "siret": "12345678901234",
-        "email": "client@example.com",
-        "transaction_id": "xxx"  (optionnel)
-    }
-    """
-    data = request.get_json() or {}
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
 
-    licence_type = data.get("licence_type")
-    siret = data.get("siret")
-    email = data.get("email")
-    transaction_id = data.get("transaction_id") or data.get("id")
+    # Vérification cryptée Stripe
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except Exception:
+        return "invalid_signature", 400
+
+    data = event.get("data", {}).get("object", {})
+
+    licence_type = data.get("metadata", {}).get("licence_type")
+    siret = data.get("metadata", {}).get("siret")
+    email = data.get("receipt_email")
+    transaction_id = data.get("id")
 
     if licence_type not in ["ANNUAL", "LIFETIME", "FREE"]:
         return "invalid_licence_type", 400
@@ -128,11 +127,12 @@ def webhook_stripe():
     }), 200
 
 
+# =====================================================
+# WEBHOOK PAYPAL
+# =====================================================
+
 @app.post("/api/webhook/paypal")
 def webhook_paypal():
-    """
-    Webhook PayPal : même format attendu que Stripe.
-    """
     data = request.get_json() or {}
 
     licence_type = data.get("licence_type")
@@ -179,51 +179,30 @@ def activate():
 
     licence = find_licence(licence_key)
 
-    # Licence inconnue
     if not licence:
         return jsonify({"status": "invalid", "reason": "not_found"})
 
-    # Licence désactivée
     if not licence.get("active", True):
         return jsonify({"status": "invalid", "reason": "inactive"})
 
     lic_type = licence.get("type")
     expires = licence.get("expires")
 
-    # FREE ou LIFETIME → toujours valides
     if lic_type in ["FREE", "LIFETIME"]:
-        return jsonify({
-            "status": "valid",
-            "type": lic_type,
-            "expires": expires
-        })
+        return jsonify({"status": "valid", "type": lic_type, "expires": expires})
 
-    # ANNUAL → vérifier expiration
     if lic_type == "ANNUAL":
-        if not expires:
-            return jsonify({"status": "invalid", "reason": "missing_expiration"})
-
         exp_date = datetime.strptime(expires, "%Y-%m-%d").date()
-        today = datetime.today().date()
-
-        if today <= exp_date:
-            return jsonify({
-                "status": "valid",
-                "type": lic_type,
-                "expires": expires
-            })
+        if datetime.today().date() <= exp_date:
+            return jsonify({"status": "valid", "type": lic_type, "expires": expires})
         else:
-            return jsonify({
-                "status": "expired",
-                "type": lic_type,
-                "expires": expires
-            })
+            return jsonify({"status": "expired", "type": lic_type, "expires": expires})
 
-    # Type inconnu
     return jsonify({"status": "invalid", "reason": "unknown_type"})
 
+
 # =====================================================
-# ENDPOINT COMPATIBLE AVEC TON LOGICIEL (SIRET)
+# ENDPOINT COMPATIBLE LOGICIEL (SIRET)
 # =====================================================
 
 @app.post("/api/licence/verify")
@@ -232,16 +211,13 @@ def verify_licence():
     siret = data.get("siret")
     licence_type = data.get("licence_type")
 
-    # Vérification SIRET
     if not siret or not siret.isdigit() or len(siret) != 14:
         return jsonify({"status": "INVALID_SIRET"})
 
-    # Génération de la licence
     licence_key, expires = generate_licence(licence_type, siret)
     if not licence_key:
         return jsonify({"status": "INVALID_TYPE"})
 
-    # Enregistrement dans licences.json
     add_licence_entry(
         licence_key=licence_key,
         licence_type=licence_type,
@@ -257,8 +233,9 @@ def verify_licence():
         "licence_key": licence_key
     })
 
+
 # =====================================================
-# LANCEMENT LOCAL (debug)
+# LANCEMENT LOCAL
 # =====================================================
 
 if __name__ == "__main__":
