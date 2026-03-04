@@ -9,7 +9,7 @@ import stripe
 # =====================================================
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")  # IMPORTANT : nouveau secret Stripe
+endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 app = Flask(__name__)
 
@@ -87,7 +87,6 @@ def webhook_stripe():
     payload = request.data
     sig_header = request.headers.get("Stripe-Signature")
 
-    # Vérification cryptée Stripe
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
@@ -128,41 +127,12 @@ def webhook_stripe():
 
 
 # =====================================================
-# WEBHOOK PAYPAL
+# WEBHOOK PAYPAL (NEUTRALISÉ)
 # =====================================================
 
 @app.post("/api/webhook/paypal")
 def webhook_paypal():
-    data = request.get_json() or {}
-
-    licence_type = data.get("licence_type")
-    siret = data.get("siret")
-    email = data.get("email")
-    transaction_id = data.get("transaction_id") or data.get("id")
-
-    if licence_type not in ["ANNUAL", "LIFETIME", "FREE"]:
-        return "invalid_licence_type", 400
-
-    licence_key, expires = generate_licence(licence_type, siret)
-    if not licence_key:
-        return "invalid_siret_or_type", 400
-
-    add_licence_entry(
-        licence_key=licence_key,
-        licence_type=licence_type,
-        siret=siret,
-        expires=expires,
-        provider="paypal",
-        email=email,
-        transaction_id=transaction_id
-    )
-
-    return jsonify({
-        "status": "ok",
-        "licence_key": licence_key,
-        "type": licence_type,
-        "expires": expires
-    }), 200
+    return jsonify({"status": "ignored"}), 200
 
 
 # =====================================================
@@ -202,7 +172,7 @@ def activate():
 
 
 # =====================================================
-# ENDPOINT COMPATIBLE LOGICIEL (SIRET)
+# ENDPOINT DE VÉRIFICATION (LOGICIEL)
 # =====================================================
 
 @app.post("/api/licence/verify")
@@ -214,24 +184,18 @@ def verify_licence():
     if not siret or not siret.isdigit() or len(siret) != 14:
         return jsonify({"status": "INVALID_SIRET"})
 
-    licence_key, expires = generate_licence(licence_type, siret)
-    if not licence_key:
-        return jsonify({"status": "INVALID_TYPE"})
+    licences = load_licences().get("licences", [])
 
-    add_licence_entry(
-        licence_key=licence_key,
-        licence_type=licence_type,
-        siret=siret,
-        expires=expires,
-        provider="manual"
-    )
+    for lic in licences:
+        if lic.get("siret") == siret and lic.get("type") == licence_type:
+            return jsonify({
+                "status": "OK",
+                "licence_key": lic.get("licence_key"),
+                "expires_at": lic.get("expires"),
+                "licence_type": licence_type
+            })
 
-    return jsonify({
-        "status": "OK",
-        "licence_type": licence_type,
-        "expires_at": expires,
-        "licence_key": licence_key
-    })
+    return jsonify({"status": "NOT_PAID"})
 
 
 # =====================================================
